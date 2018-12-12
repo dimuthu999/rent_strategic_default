@@ -1,0 +1,526 @@
+---
+title: "???"
+output: 
+  html_document:
+    toc: yes
+    number_section: yes
+---
+<style type="text/css">
+body{ 
+      font-size: 15px;
+      font-family: Helvetica,Arial,sans-serif;
+      line-height: 200%;
+  }
+  
+.author {
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+
+.date { 
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+.title{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+ 
+}
+
+.toc-ignore{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+.fluid-row{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE,echo=FALSE)
+```
+
+```{r init}
+rm(list=ls())
+library(data.table)
+library(lfe)
+library(stargazer)
+library(plyr)
+library(reshape2)
+library(lubridate)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+
+fes <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/big4_propensity_to_deny.rds")
+
+zillow_rent <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/creditsupplyshock.rds")
+  zillow_rent[,c("zip3_big4_frac","big4_nbig4","msa","city","msa_big4_frac","rent_1","zip")] <- list(NULL)
+  names(zillow_rent)[1] = "MSA"
+  
+  ffiec<- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/FFIEC.rds")
+  zillow_rent <- merge(zillow_rent,ffiec,by=c("MSA","year"),all.x = TRUE)
+  
+  zillow_rent_p_1 <- zillow_rent[,c("MSA","year","rent")]
+  zillow_rent_p_1$year <- zillow_rent_p_1$year-1
+  names(zillow_rent_p_1) <- c("MSA","year","rent_p_1")
+  
+  zillow_rent <- merge(zillow_rent,zillow_rent_p_1,by=c("MSA","year"),all.x = TRUE)
+  
+  zillow_rent_cs <- zillow_rent[,c("MSA","year","credit_supply_shock","log_delta_rent")]
+  zillow_rent_cs$year <- zillow_rent_cs$year+1
+  names(zillow_rent_cs) <- c("MSA","year","credit_supply_shock_1","log_delta_rent_1")
+  
+  zillow_rent <- merge(zillow_rent,zillow_rent_cs,by=c("MSA","year"),all.x = TRUE)
+  rm(zillow_rent_cs)
+  rm(zillow_rent_p_1)
+
+hmda <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/hmda_cleaned_merged.rds")
+
+
+#variables
+output.type="text"
+
+
+# functions
+printtable <- function(reg,column.labels,depvar,note,iv,lines) {
+  stargazer(reg,type=output.type,no.space = TRUE,omit.stat = c("f","adj.rsq","ser"),notes= note,column.labels = column.labels, dep.var.labels = "",dep.var.caption   = paste("Y: ",gsub("_"," ",depvar),"; iv: ",gsub("_"," ",iv)),dep.var.labels.include = FALSE,add.lines = lines)
+}
+
+```
+
+
+# Propensity to Deny of Big-4 Banks - Other Lenders
+```{r prop_deny_graph}
+gr <- ggplot(data=fes,aes(x=year,y=big4_nbig4,group=1))+geom_line()+ theme_bw() + xlab("Year")+ylab("Propensity to deny: Big 4 Banks - Other Lenders")+theme(panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr
+
+```
+
+
+# Propensity to Deny of Big-4 Banks - Regression
+Y=denied(i,t) <br/>
+X=<b>big4*year</b>+loan_to_income+log(applicantincome)+log(amountofloan)<br/>
+fixed effects=msa_time+msa_time+applicantrace1<br/>
+cluster by = msa_big4+msa_time<br/>
+
+```{r denied_reg}
+reg <- felm(as.formula("denied~factor(big4)*factor(asofdate)+loan_to_income+log(applicantincome)+log(amountofloan)|msa_time+msa_time+applicantrace1|0|msa_big4+msa_time"),data=hmda)
+
+coefs <- as.data.frame(reg$coefficients)
+coefs['var'] <- row.names(coefs)
+row.names(coefs) <- NULL
+coefs <- coefs[substr(coefs$var,1,30)=="factor(big4)1:factor(asofdate)",]
+coefs$var <- substr(coefs$var,31,40)
+
+se <- sqrt(diag(as.matrix(reg$clustervcv)))
+coefs['se'] <- se[(length(se)-9):length(se)]
+names(coefs) <- c("coef","year","se")
+coefs['ub'] <- coefs$coef+1.96*coefs$se
+coefs['lb'] <- coefs$coef-1.96*coefs$se
+
+coefs$year <- as.integer(coefs$year)
+
+p<- ggplot(coefs, aes(x=year, y=coef)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=lb, ymax=ub), width=0,position=position_dodge(0)) +
+  theme_bw()+ylab(expression(beta[t])) + xlab("Year of Application")+scale_x_continuous(breaks=coefs$year)+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+p
+
+```
+# Credit Supply Shock Map - 2012
+```{r}
+library(rgdal)
+library(rgeos)
+library(ggmap)
+
+usa <- map_data("usa")
+
+msa_map <- readOGR("C:/Users/dnratnadiwakara/Documents/rent_strategic_default/cb_2013_us_cbsa_500k","cb_2013_us_cbsa_500k")
+msa_map@data$id = rownames(msa_map@data)
+
+msa_map_df <- fortify(msa_map)
+msa_map_df <- join(msa_map_df,msa_map@data,by="id")
+msa_map_df['MSA'] <- as.numeric(as.character(msa_map_df$CBSAFP))
+
+zr_2012 <- zillow_rent[zillow_rent$year==2012,c("MSA","credit_supply_shock")]
+zr_2012['CSS'] <- cut(zr_2012$credit_supply_shock,
+                      breaks = c(0,quantile(zr_2012$credit_supply_shock,0.25),quantile(zr_2012$credit_supply_shock,0.5),quantile(zr_2012$credit_supply_shock,0.75),quantile(zr_2012$credit_supply_shock,1)),
+                      labels = c("< Q1","Q1-Q2","Q2-Q3",">Q3"))
+
+
+msa_map_df <- join(msa_map_df,zr_2012,by="MSA")
+msa_map_df <- msa_map_df[msa_map_df$lat<=50 & msa_map_df$lat>=25 & msa_map_df$long>-135 ,]
+msa_map_df <- msa_map_df[!is.na(msa_map_df$CSS),]
+
+west <- unique(msa_map_df[msa_map_df$long<(-95),]$MSA)
+
+
+map <- ggplot()+
+      geom_polygon(data = usa, aes(x=long, y = lat, group = group),fill="white",color="black") + 
+      coord_fixed(1.3)+
+      geom_polygon(data = msa_map_df,aes(x = long, y = lat, group = group,fill=CSS)) +
+      theme_bw()+ theme(legend.position="bottom",legend.title=element_blank())
+      
+map          
+```
+
+
+# Replicating Gete and Reher(2018) main results
+```{r rent_regression}
+
+formulas <- list()
+formulas[[1]] <- as.formula("log_delta_rent~credit_supply_shock|MSA+year|0|MSA+year")
+formulas[[2]] <- as.formula("log_delta_rent~credit_supply_shock+log(familyincome)+log(population)+unemployment_rate+median_age_msa|MSA+year|0|MSA+year")
+
+
+
+regs <- list()
+regs[[1]] <- reg <- felm(formulas[[1]],data = zillow_rent)
+regs[[2]] <- reg <- felm(formulas[[2]],data = zillow_rent)
+
+note =c("Fixed Effects:  Year, MSA","Standard Errors clustered by MSA+Year")
+
+
+printtable(regs,"","dela_log(rent)",note,"none","")
+```
+
+
+```{r acs_data}
+# https://api.census.gov/data/2012/acs5/variables.html
+
+# variables <- c("B19013_001E","B01002_001E","B01003_001E")#,"B07413_003E")#,"B27011_014E")
+# names <- c("MedianHouseholdIncome","MedianAge","TotalPopulation")#,"Renters")#,"Unemployed")
+# years <- 2010:2017
+# 
+# 
+# 
+# for(i in 1:length(variables)) {
+#   print(i)
+#   for(year in years) {
+#     baseurl = paste("https://api.census.gov/data/",year,"/acs/acs5?for=metropolitan%20statistical%20area/micropolitan%20statistical%20area:*&get=",sep="")
+#     
+#   
+#     fullurl = paste(baseurl,variables[i],sep="")
+#   
+#     temp <- fromJSON(fullurl)
+#   
+#     fullurl = paste(baseurl,variables[i],sep="")
+#   
+#     temp <- fromJSON(fullurl)
+#   
+#     temp<- as.data.frame(do.call("rbind", temp))
+#     
+#     # temp <- apply(temp,2,as.character)
+#     # temp <- as.data.frame(temp)
+#     # temp[,1] <- as.character(temp[,1])
+#     # temp[,2] <- as.character(temp[,2])
+#     # 
+#     temp <- temp[2:nrow(temp),]
+#     temp['year'] <- year
+#     temp['variable'] <- names[i]
+#     temp[,1] <- as.character(temp[,1])
+#     temp[,2] <- as.character(temp[,2])
+#     write.table(temp,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/temp.csv",col.names = FALSE,row.names = FALSE,sep="|",quote = FALSE,append = TRUE)
+#   }
+# } 
+# 
+# temp <- read.csv(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/temp.csv",sep="|",stringsAsFactors = FALSE,header = FALSE)
+# names(temp) <- c("value","MSA","year","variable")
+# 
+# temp <- dcast(temp,formula=MSA+year~variable)
+# temp <- data.table(temp)
+
+```
+
+
+```{r read_freddie_data}
+rm(hmda)
+rm(reg)
+rm(regs)
+gc()
+
+# # these files were created by 03 create_loan_month_freddie.R
+# file_list<- list.files(path="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/processed data/freddie per data",pattern="*.rds",full.names = TRUE)
+# loan_month = lapply(file_list, function (x) data.table(readRDS(x)))
+# loan_month = rbindlist(loan_month, fill = TRUE)
+# loan_month[ ,zip3:= loan_month$POSTALCODE]
+# loan_month[ ,month:= loan_month$CURRENTMONTH]
+# loan_month[ ,year := as.numeric(substr(loan_month$month,1,4))]
+# 
+# loan_month[,default:=ifelse(loan_month$CURRENTLOANDELINQ>=1,1,0)]
+# loan_month[,foreclosed:= ifelse(loan_month$ZEROBALANCECODE>=3 & !is.na(loan_month$ZEROBALANCECODE),1,0)]
+# loan_month[,prepaid:=ifelse(loan_month$ZEROBALANCECODE==1 & !is.na(loan_month$ZEROBALANCECODE),1,0)]
+# 
+# loan_month <- merge(loan_month,zillow_rent,by=c("MSA","year"))
+# 
+# loan_month <- loan_month[loan_month$log_delta_rent >-0.2 & loan_month$log_delta_rent<0.2]
+# loan_month <- loan_month[loan_month$current_equity>-1]
+# 
+# cols.to.del <- c("REPURCHASEFLAG","MODIFICATIONFLAG","MODIFICATIONCOST","FIRSTPAYMENTDATE","MATURITYDATE","NUMBEROFUNITS","LOANTERM","org_hpi","current_hpi","POSTALCODE")
+# loan_month[,(cols.to.del):=NULL]
+# 
+# loan_month <- merge(loan_month,temp,by=c("MSA","year"),all.x=TRUE)
+# 
+# 
+# saveRDS(loan_month,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/freddie_loanmonth_cleaned_merged_with_rent.rds")
+
+
+loan_month <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/freddie_loanmonth_cleaned_merged_with_rent.rds")
+
+loan_month <- loan_month[loan_month$log_delta_rent >-0.1 & loan_month$log_delta_rent<0.1]
+loan_month <- loan_month[!is.na(loan_month$credit_supply_shock_1)]
+
+
+
+```
+
+# Descriptive Statistics: Freddie data and zillow rent data
+```{r}
+
+stargazer(loan_month[, c("ORGMONTH","ORIGINALINTERESTRATE","ORIGINALUPB","CREDITSCORE","DTI","LTV","default","rent","credit_supply_shock_1")], type = "text", summary.stat = c("mean","median","sd", "n"),notes = "",digits = 4)
+
+```
+
+
+# Binned Scatter Plots
+```{r}
+
+adj_logrent <- felm(log(rent)~0|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month)
+adj_logrent_resid <- adj_logrent$residuals
+
+adj_credit_supply_shock <- felm(credit_supply_shock_1~0|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month)
+adj_credit_supply_shock_resid <- adj_credit_supply_shock$residuals
+
+adj_default <- felm(default~0|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month)
+adj_default_resid <- adj_default$residuals
+
+iv_effect <- lm(adj_logrent_resid~adj_credit_supply_shock_resid)
+iv_effect_on_rent <- as.vector(predict(iv_effect))
+
+resids <- as.data.frame(cbind(adj_logrent_resid,adj_credit_supply_shock_resid,adj_default_resid,iv_effect_on_rent))
+names(resids) <- c("log_rent","credit_supply_shock_1","adj_default_resid","iv_effect_on_rent")
+resids <- resids[resids$credit_supply_shock_1>=quantile(resids$credit_supply_shock_1,0.01)  & resids$credit_supply_shock_1<=quantile(resids$credit_supply_shock_1,0.99) &
+                   resids$iv_effect_on_rent>=quantile(resids$iv_effect_on_rent,0.01)  & resids$iv_effect_on_rent<=quantile(resids$iv_effect_on_rent,0.99),]
+
+resids['css_rounded'] <- floor(resids$credit_supply_shock_1*10000)/10000
+resids['css_percent'] <- ntile(resids$credit_supply_shock_1,1000)
+resids['iv_effect_rounded'] <- floor(resids$iv_effect_on_rent*10000)/10000
+resids['iveffect_percent'] <- ntile(resids$iv_effect_on_rent,1000)
+resids <- data.table(resids)
+
+resids_summary <- resids[,list(mean_rent=mean(log_rent),med_css=median(credit_supply_shock_1),q25_rent=quantile(log_rent,0.25),q75_rent=quantile(log_rent,0.75)),by=list(css_rounded)]
+# resids_summary <- resids_summary[resids_summary$mean_rent>quantile(resids_summary$mean_rent,0.01) & resids_summary$mean_rent<quantile(resids_summary$mean_rent,0.99)]
+
+g1 = ggplot(resids_summary,aes(x=med_css,y=mean_rent))+geom_point()+stat_smooth(aes(x=med_css,y=mean_rent),method="lm",formula=y~poly(x,1),se=TRUE)
+
+
+default_summary <- resids[,list(default_resid=mean(adj_default_resid),med_iv_effect=median(iv_effect_on_rent)),by=list(iv_effect_rounded)]
+
+
+g2 = ggplot(default_summary,aes(x=med_iv_effect,y=default_resid))+geom_point()+stat_smooth(aes(x=med_iv_effect,y=default_resid),method="lm",formula=y~poly(x,1),se=TRUE)
+g1
+g2
+# library(np)
+# bw = (max(resids$credit_supply_shock_1)-min(resids$credit_supply_shock_1))/10
+# 
+# ks <- ksmooth(as.vector(resids$log_rent),as.vector(resids$credit_supply_shock_1),"normal")
+# 
+# 
+# lines(ksmooth(as.vector(adj_logrent_resid),as.vector(adj_credit_supply_shock_resid),"normal",bandwidth =))
+# bw <- npregbw(formula=as.vector(adj_logrent_resid)~as.vector(adj_credit_supply_shock_resid),bws=(max(adj_credit_supply_shock_resid)-min(adj_credit_supply_shock_resid))/10,bwtype="fixed",bandwidth.compute=F)
+# 
+# model <- npreg(bws=bw,gradients = TRUE)
+# plot.out <- plot(model, plot.errors.method="asymptotic",plot.errors.style="band",plot.behavior="data")
+# y.eval <- fitted(plot.out$r1)
+# x.eval <- plot.out$r1$eval[,1]
+# y.se <- se(plot.out$r1)
+# y.lower.ci <- y.eval+1.96*y.se[,1]
+# y.upper.ci <- y.eval+1.96*y.se[,2]
+# df <- as.data.frame(cbind(x.eval,y.eval,y.lower.ci,y.upper.ci))
+```
+
+# Rent Impact on Default - without controls
+```{r}
+
+note =c("Fixed Effects: Loan, Year, MSA","Standard Errors clustered by Loan")
+
+
+formulas <- list()
+
+formulas[[1]] <- as.formula(paste("default~log(rent)|factor(year)+factor(MSA)+factor(LOANNO)+factor(SELLERNAME)|0|LOANNO",sep=""))
+
+formulas[[2]] <- as.formula(paste("log(rent)~credit_supply_shock_1|factor(year)+factor(MSA)+factor(LOANNO)+factor(SELLERNAME)|0|LOANNO",sep=""))
+
+formulas[[3]] <- as.formula(paste("default~1|factor(year)+factor(MSA)+factor(LOANNO)+factor(SELLERNAME)|(log(rent)~credit_supply_shock_1)|LOANNO",sep=""))
+
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month) #[loan_month$CURRENTLOANDELINQ<=1,]
+
+
+condf <- c("Cond. F. Stat","","",round(condfstat(iv_reg[[3]])[[1]],2))
+
+printtable(iv_reg,c("OLS","First Stage","IV"),"default",note,"credit supply shock",list(condf))
+
+```
+
+
+# Rent Impact on Default - with controls
+```{r}
+
+note =c("Fixed Effects: Loan, Year, MSA, Seller","Standard Errors clustered by Loan")
+controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)+MedianAge+log(MedianHouseholdIncome)+log(TotalPopulation)|factor(year)+factor(MSA)+factor(LOANNO)+factor(SELLERNAME)"
+
+formulas <- list()
+
+formulas[[1]] <- as.formula(paste("default~log(rent)+",controls,"|0|LOANNO",sep=""))
+
+formulas[[2]] <- as.formula(paste("log(rent)~credit_supply_shock_1+",controls,"|0|LOANNO",sep=""))
+
+formulas[[3]] <- as.formula(paste("default~",controls,"|(log(rent)~credit_supply_shock_1)|LOANNO",sep=""))
+
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month) #[loan_month$CURRENTLOANDELINQ<=1,]
+
+
+condf <- c("Cond. F. Stat","","",round(condfstat(iv_reg[[3]])[[1]],2))
+
+printtable(iv_reg,c("OLS","First Stage","IV"),"default",note,"credit supply shock",list(condf))
+
+```
+
+
+
+# Rent Impact on Default - FICO split
+```{r}
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[3]], data=loan_month[loan_month$CREDITSCORE<=700])
+iv_reg[[2]] <- felm(formulas[[3]], data=loan_month[loan_month$CREDITSCORE> 700 & loan_month$CREDITSCORE<=750])
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month[loan_month$CREDITSCORE> 750 & loan_month$CREDITSCORE<=780])
+iv_reg[[4]] <- felm(formulas[[3]], data=loan_month[loan_month$CREDITSCORE>780])
+
+printtable(iv_reg,c("<700","700-750","750-780",">780"),"default",note,"credit supply shock","")
+
+
+```
+
+
+# Rent Impact on Default - CLTV split
+```{r}
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[3]], data=loan_month[loan_month$CLTV<80])
+iv_reg[[2]] <- felm(formulas[[3]], data=loan_month[loan_month$CLTV==80])
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month[loan_month$CLTV> 80])
+
+
+printtable(iv_reg,c("<80","=80",">80"),"default",note,"credit supply shock","")
+
+
+```
+
+
+
+# Rent Impact on Default - Loan Amount split
+```{r}
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[3]], data=loan_month[loan_month$ORIGINALUPB<=100000])
+iv_reg[[2]] <- felm(formulas[[3]], data=loan_month[loan_month$ORIGINALUPB> 100000 & loan_month$ORIGINALUPB<=150000])
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month[loan_month$ORIGINALUPB> 150000 & loan_month$ORIGINALUPB<=210000])
+iv_reg[[4]] <- felm(formulas[[3]], data=loan_month[loan_month$ORIGINALUPB>210000])
+
+printtable(iv_reg,c("<100k","100k-150k","150k-210k",">210k"),"default",note,"credit supply shock","")
+
+
+```
+
+
+# Rent Impact on Default - DTI split
+```{r}
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[3]], data=loan_month[loan_month$DTI<=27])
+iv_reg[[2]] <- felm(formulas[[3]], data=loan_month[loan_month$DTI> 27 & loan_month$DTI<=35])
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month[loan_month$DTI> 35 & loan_month$DTI<=43])
+iv_reg[[4]] <- felm(formulas[[3]], data=loan_month[loan_month$DTI>43])
+
+printtable(iv_reg,c("<27","27-35","35-43",">43"),"default",note,"credit supply shock","")
+
+
+```
+
+
+
+# Rent Impact on Default - with controls - east/west split
+```{r}
+
+note =c("Fixed Effects: Loan, Year, MSA","Standard Errors clustered by Loan")
+
+
+formula <- as.formula(paste("default~",controls,"|(log(rent)~credit_supply_shock_1)|LOANNO",sep=""))
+
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formula, data=loan_month[loan_month$MSA %in% west,])
+iv_reg[[2]] <- felm(formula, data=loan_month[!loan_month$MSA %in% west,])
+# iv_reg[[3]] <- felm(formula, data=loan_month[!loan_month$MSA %in% c(t1,t2),])
+# iv_reg[[3]] <- felm(formulas[[3]], data=loan_month) #[loan_month$CURRENTLOANDELINQ<=1,]
+
+
+condf <- c("Cond. F. Stat",round(condfstat(iv_reg[[1]])[[1]],2),round(condfstat(iv_reg[[2]])[[1]],2))
+
+printtable(iv_reg,c("West of long -95","East of long -95"),"default",note,"credit supply shock",list(condf))
+
+```
+
+
+# Rent Impact on Prepayment - with controls
+```{r}
+
+note =c("Fixed Effects: Loan, Year, MSA","Standard Errors clustered by Loan")
+controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)+MedianAge+log(MedianHouseholdIncome)+log(TotalPopulation)|factor(year)+factor(MSA)+factor(LOANNO)+factor(SELLERNAME)"
+
+formulas <- list()
+
+formulas[[1]] <- as.formula(paste("prepaid~log(rent)+",controls,"|0|LOANNO",sep=""))
+
+formulas[[2]] <- as.formula(paste("log(rent)~credit_supply_shock_1+",controls,"|0|LOANNO",sep=""))
+
+formulas[[3]] <- as.formula(paste("prepaid~",controls,"|(log(rent)~credit_supply_shock_1)|LOANNO",sep=""))
+
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+iv_reg[[2]] <- felm(formulas[[3]], data=loan_month) #[loan_month$CURRENTLOANDELINQ<=1,]
+
+
+condf <- c("Cond. F. Stat","",round(condfstat(iv_reg[[2]])[[1]],2))
+
+printtable(iv_reg,c("OLS","IV"),"prepaid",note,"credit supply shock",list(condf))
+
+```
+
