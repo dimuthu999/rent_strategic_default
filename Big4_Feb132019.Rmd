@@ -1,0 +1,611 @@
+---
+title: "Impact of CSS on Default and Rent"
+output: 
+  html_document:
+    toc: yes
+    number_section: yes
+---
+<style type="text/css">
+body{ 
+      font-size: 15px;
+      font-family: Helvetica,Arial,sans-serif;
+      line-height: 200%;
+  }
+  
+.author {
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+
+.date { 
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+.title{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+ 
+}
+
+.toc-ignore{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+.fluid-row{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE,echo=FALSE)
+```
+
+```{r init}
+rm(list=ls())
+library(data.table)
+library(lfe)
+library(stargazer)
+library(plyr)
+library(reshape2)
+library(lubridate)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+
+fes <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/big4_propensity_to_deny.rds")
+fes$year <- as.integer(fes$year)
+
+msa_frac <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/msa_frac.rds")
+
+css <- merge(fes,msa_frac)
+css['css'] <- css$big4_nbig4*css$msa_big4_frac
+css$year <- css$year+1
+
+
+
+# hmda <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/hmda_cleaned_merged_refin.rds")
+
+#variables
+output.type="text"
+
+
+# functions
+printtable <- function(reg,column.labels,depvar,note,iv,lines) {
+  stargazer(reg,type=output.type,no.space = TRUE,omit.stat = c("f","adj.rsq","ser"),notes= note,column.labels = column.labels, dep.var.labels = "",dep.var.caption   = paste("Y: ",gsub("_"," ",depvar),"; iv: ",gsub("_"," ",iv)),dep.var.labels.include = FALSE,add.lines = lines)
+}
+
+```
+
+
+# Credit Supply Shock Variable
+
+```{r}
+css_summary <-  css %>%
+                group_by(year) %>%
+                select(css) %>%
+                summarise_all(funs(mean_css=mean,median_css=median,sd_css=sd))
+stargazer(css_summary,summary = FALSE,digits = 4,type="text")
+```
+
+# Propensity to Deny of Big-4 Banks - Other Lenders
+```{r prop_deny_graph}
+gr <- ggplot(data=fes,aes(x=year,y=big4_nbig4,group=1))+geom_line()+ theme_bw() + xlab("Year")+ylab("Propensity to deny: Big 4 Banks - Other Lenders")+theme(panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr
+
+```
+
+
+# Propensity to Deny of Big-4 Banks - New Home Purchases
+Y=denied(i,t) <br/>
+X=<b>big4*year</b>+loan_to_income+log(applicantincome)+log(amountofloan)<br/>
+fixed effects=msa_time+msa_time+applicantrace1<br/>
+cluster by = msa_big4+msa_time<br/>
+
+```{r denied_reg}
+
+hmda <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/hmda_cleaned_merged.rds")
+hmda<-hmda[hmda$asofdate >= 2008,]
+
+reg <- felm(as.formula("denied~factor(big4)*factor(asofdate)+loan_to_income+log(applicantincome)+log(amountofloan)|msa_time+msa_big4+applicantrace1|0|msa_big4+msa_time"),data=hmda)
+
+coefs <- as.data.frame(reg$coefficients)
+coefs['var'] <- row.names(coefs)
+row.names(coefs) <- NULL
+coefs <- coefs[substr(coefs$var,1,30)=="factor(big4)1:factor(asofdate)",]
+coefs$var <- substr(coefs$var,31,40)
+
+se <- sqrt(diag(as.matrix(reg$clustervcv)))
+coefs['se'] <- se[(length(se)-5):length(se)]
+names(coefs) <- c("coef","year","se")
+coefs['ub'] <- coefs$coef+1.96*coefs$se
+coefs['lb'] <- coefs$coef-1.96*coefs$se
+
+coefs$year <- as.integer(coefs$year)
+
+coefs <- rbind(c(0,2008,0,0,0),coefs)
+
+p<- ggplot(coefs, aes(x=year, y=coef)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=lb, ymax=ub), width=0,position=position_dodge(0)) +
+  theme_bw()+ylab(expression(beta[y])) + xlab("Year of Application")+scale_x_continuous(breaks=coefs$year)+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+p
+
+rm(hmda)
+gc()
+```
+
+
+
+# Propensity to Deny of Big-4 Banks - Refinances
+```{r denied_reg_refin}
+
+hmda <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/hmda_cleaned_merged_refin.rds")
+hmda<-hmda[hmda$asofdate >= 2008,]
+
+reg <- felm(as.formula("denied~factor(big4)*factor(asofdate)+loan_to_income+log(applicantincome)+log(amountofloan)|msa_time+msa_big4+applicantrace1|0|msa_big4+msa_time"),data=hmda)
+
+coefs <- as.data.frame(reg$coefficients)
+coefs['var'] <- row.names(coefs)
+row.names(coefs) <- NULL
+coefs <- coefs[substr(coefs$var,1,30)=="factor(big4)1:factor(asofdate)",]
+coefs$var <- substr(coefs$var,31,40)
+
+se <- sqrt(diag(as.matrix(reg$clustervcv)))
+coefs['se'] <- se[(length(se)-5):length(se)]
+names(coefs) <- c("coef","year","se")
+coefs['ub'] <- coefs$coef+1.96*coefs$se
+coefs['lb'] <- coefs$coef-1.96*coefs$se
+
+coefs$year <- as.integer(coefs$year)
+
+coefs <- rbind(c(0,2008,0,0,0),coefs)
+
+p<- ggplot(coefs, aes(x=year, y=coef)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=lb, ymax=ub), width=0,position=position_dodge(0)) +
+  theme_bw()+ylab(expression(beta[y])) + xlab("Year of Application")+scale_x_continuous(breaks=coefs$year)+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+p
+
+rm(hmda)
+gc()
+```
+
+
+```{r}
+
+
+zillow_rent <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/creditsupplyshock.rds")
+  zillow_rent[,c("zip3_big4_frac","big4_nbig4","msa","city","msa_big4_frac","rent_1","zip")] <- list(NULL)
+  names(zillow_rent)[1] = "MSA"
+  
+  ffiec<- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/FFIEC.rds")
+  zillow_rent <- merge(zillow_rent,ffiec,by=c("MSA","year"),all.x = TRUE)
+  
+  zillow_rent_p_1 <- zillow_rent[,c("MSA","year","rent")]
+  zillow_rent_p_1$year <- zillow_rent_p_1$year-1
+  names(zillow_rent_p_1) <- c("MSA","year","rent_p_1")
+  
+  zillow_rent <- merge(zillow_rent,zillow_rent_p_1,by=c("MSA","year"),all.x = TRUE)
+  
+  zillow_rent_cs <- zillow_rent[,c("MSA","year","credit_supply_shock","log_delta_rent")]
+  zillow_rent_cs$year <- zillow_rent_cs$year+1
+  names(zillow_rent_cs) <- c("MSA","year","credit_supply_shock_1","log_delta_rent_1")
+  
+  zillow_rent <- merge(zillow_rent,zillow_rent_cs,by=c("MSA","year"),all.x = TRUE)
+  rm(zillow_rent_cs)
+  rm(zillow_rent_p_1)
+  
+  
+
+```
+
+
+
+# Credit Supply Shock Map - 2012
+```{r}
+library(rgdal)
+library(rgeos)
+library(ggmap)
+
+usa <- map_data("usa")
+
+msa_map <- readOGR("C:/Users/dnratnadiwakara/Documents/rent_strategic_default/cb_2013_us_cbsa_500k","cb_2013_us_cbsa_500k")
+msa_map@data$id = rownames(msa_map@data)
+
+msa_map_df <- fortify(msa_map)
+msa_map_df <- join(msa_map_df,msa_map@data,by="id")
+msa_map_df['MSA'] <- as.numeric(as.character(msa_map_df$CBSAFP))
+
+zr_2012 <- zillow_rent[zillow_rent$year==2012,c("MSA","credit_supply_shock")]
+zr_2012['CSS'] <- cut(zr_2012$credit_supply_shock,
+                      breaks = c(0,quantile(zr_2012$credit_supply_shock,0.25),quantile(zr_2012$credit_supply_shock,0.5),quantile(zr_2012$credit_supply_shock,0.75),quantile(zr_2012$credit_supply_shock,1)),
+                      labels = c("< Q1","Q1-Q2","Q2-Q3",">Q3"))
+
+
+msa_map_df <- join(msa_map_df,zr_2012,by="MSA")
+msa_map_df <- msa_map_df[msa_map_df$lat<=50 & msa_map_df$lat>=25 & msa_map_df$long>-135 ,]
+msa_map_df <- msa_map_df[!is.na(msa_map_df$CSS),]
+
+west <- unique(msa_map_df[msa_map_df$long<(-95),]$MSA)
+
+
+map <- ggplot()+
+      geom_polygon(data = usa, aes(x=long, y = lat, group = group),fill="white",color="black") + 
+      coord_fixed(1.3)+
+      geom_polygon(data = msa_map_df,aes(x = long, y = lat, group = group,fill=CSS)) +
+      theme_bw()+ theme(legend.position="bottom",legend.title=element_blank())
+      
+map          
+```
+
+
+
+```{r read_freddie_data}
+rm(hmda)
+rm(reg)
+rm(regs)
+gc()
+loan_month <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/processed data/freddie per data/freddie_data_loan_month.rds")
+
+
+loan_month[,default_2:=ifelse(!loan_month$CURRENTLOANDELINQ %in% c("0","1","2","3","4"),1,0)]
+loan_month[,default:=ifelse(!loan_month$CURRENTLOANDELINQ %in% c("0"),1,0)]
+loan_month[,foreclosed:= ifelse(loan_month$ZEROBALANCECODE>=3 & !is.na(loan_month$ZEROBALANCECODE),1,0)]
+loan_month[,prepaid:=ifelse(loan_month$ZEROBALANCECODE==1 & !is.na(loan_month$ZEROBALANCECODE),1,0)]
+
+
+loan_month <- merge(loan_month,css[,c("msa","year","css")],by.x=c("MSA","year"),by.y = c("msa","year"),all.x=TRUE)
+
+loan_month <- merge(loan_month,zillow_rent,by=c("MSA","year"))
+
+cols.to.del <- c("REPURCHASEFLAG","MODIFICATIONFLAG","MODIFICATIONCOST","FIRSTPAYMENTDATE","MATURITYDATE","NUMBEROFUNITS","LOANTERM","org_hpi","current_hpi","POSTALCODE")
+loan_month[,(cols.to.del):=NULL]
+
+loan_month <- loan_month[loan_month$log_delta_rent >-0.1 & loan_month$log_delta_rent<0.1]
+loan_month <- loan_month[loan_month$current_equity>-1]
+loan_month <- loan_month[!is.na(loan_month$credit_supply_shock_1)]
+
+```
+
+```{r}
+#   
+# zillow_rent <- read.csv(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/Affordability_ChainedZRI_2018Q3.csv")
+# zillow_rent$RegionID <- NULL
+# zillow_rent$SizeRank <- NULL
+# 
+# zillow_rent <- melt(zillow_rent,id.vars = c("RegionName"))
+# zillow_rent['year'] <- substr(zillow_rent$variable,2,5)
+# zillow_rent['month'] <- substr(zillow_rent$variable,7,8)
+# zillow_rent <- zillow_rent[zillow_rent$month=="12",]
+# zillow_rent$variable <- NULL
+# zillow_rent$month <- NULL
+# zillow_rent$RegionName <- as.character(zillow_rent$RegionName)
+# 
+# names(zillow_rent) <- c("msa","rent","year")
+# zillow_rent['city'] <- tolower(zillow_rent$msa)
+# 
+# library(zipcode)
+# data("zipcode")
+# zipcode$city <- tolower(paste(zipcode$city,", ",zipcode$state,sep=""))
+# zipcode[,c("state","latitude","longitude")] <- list(NULL)
+# 
+# zillow_rent <- merge(zillow_rent,zipcode,by="city",all.x = TRUE)
+# 
+# unmatched <- read.csv(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/unmatched_msa_2.csv")
+# unmatched$msa <- as.character(unmatched$msa)
+# zillow_rent <- merge(zillow_rent,unmatched,by="msa",all.x = TRUE)
+# zillow_rent$zip <- ifelse(is.na(zillow_rent$zip),zillow_rent$zip2,zillow_rent$zip)
+# zillow_rent <- zillow_rent[!is.na(zillow_rent$zip),]
+# zillow_rent <- zillow_rent[!is.na(zillow_rent$rent),]
+# zillow_rent$zip2 <- NULL
+# zillow_rent$zip <- as.integer(zillow_rent$zip)
+# 
+# zip_cbsa <- read.csv(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/ZIP_CBSA_092018.csv")
+# zillow_rent <- merge(zillow_rent,zip_cbsa,by="zip",all.x = TRUE)
+# not_na <- unique(zillow_rent[!is.na(zillow_rent$cbsa),]$msa)
+# yes_na <- unique(zillow_rent[is.na(zillow_rent$cbsa),]$msa)
+# unmatched <- not_na[!not_na %in% yes_na]
+# zillow_rent <- zillow_rent[!is.na(zillow_rent$cbsa),]
+# zillow_rent <- zillow_rent[!duplicated(zillow_rent[,c("cbsa","year")]),]
+# 
+# zillow_rent <- zillow_rent[!is.na(zillow_rent$rent),]
+# zillow_rent$msa <- NULL
+# zillow_rent$year <- as.numeric(zillow_rent$year)
+# zillow_rent$zip <- NULL
+# zillow_rent$city <- NULL
+# 
+# names(zillow_rent) <- c("rent","year","MSA")
+# 
+
+
+# loan_month <- merge(loan_month,zillow_rent,by=c("MSA","year"))
+# 
+# cols.to.del <- c("REPURCHASEFLAG","MODIFICATIONFLAG","MODIFICATIONCOST","FIRSTPAYMENTDATE","MATURITYDATE","NUMBEROFUNITS","LOANTERM","org_hpi","current_hpi","POSTALCODE")
+# loan_month[,(cols.to.del):=NULL]
+
+```
+
+# ACS Data
+```{r}
+# library(tidycensus)
+# census_api_key("06b232797e7854aad802d7c7d8673c337fe1b29a")
+# 
+# for(year in 2017:2010) {
+#           print(year)
+#           temp <- get_acs(geography = "metropolitan statistical area/micropolitan statistical area", year = year,output = "wide",
+#                          variables = c("B19013_001E","B01002_001E","B01003_001E","B02001_003E","B02001_002E","B07013_003E","B10058_002E","B06009_004E"))
+#           temp['year'] <- year
+#           temp[,c("B19013_001M","B01002_001M","B01003_001M","B02001_003M","B02001_002M","B07013_003M","B10058_002M","B06009_004M")] <- NULL
+#           write.table(temp,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",col.names = FALSE,row.names = FALSE,sep="|",quote = FALSE,append = TRUE)
+# }
+# temp$year = 2009
+# write.table(temp,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",col.names = FALSE,row.names = FALSE,sep="|",quote = FALSE,append = TRUE)
+# temp$year = 2008
+# write.table(temp,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",col.names = FALSE,row.names = FALSE,sep="|",quote = FALSE,append = TRUE)
+
+acs_data <- fread("C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",sep="|",stringsAsFactors = FALSE,header = FALSE)
+names(acs_data) <- c("MSA","name","medianhhincome","medianage","totalpopulation","blackpopulation","whitepopulation","renters","laborforce","collegedegree","year")
+acs_data$name <- NULL
+acs_data[,white_frac:= acs_data$whitepopulation/acs_data$totalpopulation]
+acs_data[,renter_frac:= acs_data$renters/acs_data$totalpopulation]
+acs_data[,collegedegree_frac:= acs_data$collegedegree/acs_data$totalpopulation]
+acs_data[,c("blackpopulation","whitepopulation","renters","laborforce","collegedegree"):=list(NULL)]
+
+loan_month[,c("name","medianhhincome","medianage","totalpopulation","blackpopulation","whitepopulation","renters","laborforce","collegedegree"):=list(NULL)]
+
+loan_month <- merge(loan_month,acs_data,by=c("MSA","year"),all.x=TRUE)
+
+```
+
+
+# BLS Data
+```{r}
+bls_data <- fread(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/bls_unemp_metro.txt")
+bls_data[,MSA:=as.integer(substr(bls_data$series_id,8,12))]
+bls_data[,month:=as.Date(paste(bls_data$year,substr(bls_data$period,2,3),"01",sep="-"))]
+bls_data[,series:=substr(bls_data$series_id,19,20)]
+bls_data <- bls_data[bls_data$series=="03"]
+bls_data[,c("series_id","year","period","footnote_codes","series"):=list(NULL)]
+names(bls_data) <- c("unemp_rate","MSA","month")
+bls_data <- bls_data[!duplicated(bls_data[,c("MSA","month")])]
+bls_data <- bls_data[bls_data$month >= "2008-01-01"]
+setkey(bls_data,MSA,month)
+
+setkey(loan_month,MSA,month)
+loan_month <- merge(loan_month,bls_data,by=c("MSA","month"),all.x=TRUE)
+
+
+```
+
+
+# Descriptive Statistics: Freddie data 
+```{r}
+
+stargazer(loan_month[, c("ORGMONTH","ORIGINALINTERESTRATE","ORIGINALUPB","CREDITSCORE","DTI","LTV","default","default_2")], type = "text", summary.stat = c("mean","median","sd", "n"),notes = "",digits = 4)
+
+```
+
+
+# Default on CSS(y-1)
+```{r}
+
+note =c("Fixed Effects: Loan, Year, MSA, Seller","Standard Errors clustered by Loan,MSA")
+controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)+unemp_rate+log(medianhhincome)+log(totalpopulation)+white_frac+renter_frac+collegedegree_frac|factor(year)+factor(MSA)+factor(LOANNO)"
+# controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)|factor(year)+factor(MSA)+factor(LOANNO)"
+
+formulas <- list()
+
+formulas[[1]] <- as.formula(paste("default~css|factor(year)+factor(MSA)+factor(LOANNO)|0|LOANNO+MSA",sep=""))
+formulas[[2]] <- as.formula(paste("default~css+",controls,"|0|LOANNO+zip3",sep=""))
+formulas[[3]] <- as.formula(paste("default_2~css|factor(year)+factor(MSA)+factor(LOANNO)|0|LOANNO+MSA",sep=""))
+formulas[[4]] <- as.formula(paste("default_2~css+",controls,"|0|LOANNO+MSA",sep=""))
+
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+iv_reg[[2]] <- NULL
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month)
+iv_reg[[4]] <- felm(formulas[[4]], data=loan_month)
+
+printtable(iv_reg,c("default 3mn","default 3mn","default 5mn","default 5mn"),"default",note,"credit supply shock",list(""))
+
+```
+
+
+
+# Default on CSS(y-1): Binned Scatter Plot
+```{r}
+adj_default <- felm(default~0|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month)
+adj_default_resid <- adj_default$residuals
+
+adj_credit_supply_shock <- felm(css~0|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month)
+adj_credit_supply_shock_resid <- adj_credit_supply_shock$residuals
+
+resids <- as.data.frame(cbind(adj_credit_supply_shock_resid,adj_default_resid))
+names(resids) <- c("css","adj_default_resid")
+
+resids <- resids[resids$css>=quantile(resids$css,0.01)  & resids$css<=quantile(resids$css,0.99),]
+
+
+resids['css_rounded'] <- floor(resids$css*10000)/10000
+resids['css_percent'] <- ntile(resids$css,1000)
+
+resids <- data.table(resids)
+
+resids_summary <- resids[,list(mean_default=mean(adj_default_resid)),by=list(css_rounded)]
+
+
+g1 = ggplot(resids_summary,aes(x=css_rounded,y=mean_default))+geom_point()+geom_smooth(method="lm",formula=y~x,se=FALSE,color="red")+xlab("FE adjusted CSS")+ylab("FE adjusted default")+theme_minimal()
+g1
+```
+
+
+# Prepayment on CSS(y-1)
+```{r}
+rm(iv_reg)
+
+formulas <- list()
+
+formulas[[1]] <- as.formula(paste("prepaid~css|factor(year)+factor(MSA)+factor(LOANNO)|0|LOANNO+MSA",sep=""))
+formulas[[2]] <- as.formula(paste("prepaid~css+",controls,"|0|LOANNO+MSA",sep=""))
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+
+printtable(iv_reg,c("",""),"prepaid",note,"credit supply shock",list(""))
+
+formulas[[2]] <- as.formula(paste("default~css+",controls,"|0|LOANNO+MSA",sep=""))
+```
+
+# Default on CSS(y-1) - FICO split
+```{r}
+
+# loan_month[,fico_qs:=ntile(loan_month$CREDITSCORE,4)]
+
+iv_reg <- list()
+formula <- as.formula(paste("default~css*factor(fico_qs)+",controls,"|0|LOANNO+MSA",sep=""))
+
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE<=700])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE> 700 & loan_month$CREDITSCORE<=750])
+iv_reg[[3]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE> 750 & loan_month$CREDITSCORE<=780])
+iv_reg[[4]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE>780])
+
+printtable(iv_reg,c("<700","700-750","750-780",">780"),"default",note,"credit supply shock","")
+
+
+```
+
+# Default on CSS(y-1) - CLTV split
+```{r}
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$CLTV<=80])
+# iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$CLTV==80])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$CLTV> 80])
+
+
+printtable(iv_reg,c("<=80",">80"),"default",note,"","")
+
+
+```
+
+
+# Default on CSS(y-1) - Loan Amount Split
+```{r}
+rm(iv_reg)
+gc()
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$ORIGINALUPB<=125000])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$ORIGINALUPB> 125000 & loan_month$ORIGINALUPB<=250000])
+iv_reg[[3]] <- felm(formulas[[2]], data=loan_month[loan_month$ORIGINALUPB>250000])
+
+printtable(iv_reg,c("<125k","125k-250k",">250k"),"default",note,"","")
+
+
+```
+
+
+
+# Default on CSS(y-1) - DTI split
+```{r}
+rm(iv_reg)
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$DTI<=30])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$DTI> 30 & loan_month$DTI<=40])
+iv_reg[[3]] <- felm(formulas[[2]], data=loan_month[loan_month$DTI>40])
+
+printtable(iv_reg,c("<=30","30-40",">40"),"default",note,"","")
+
+
+```
+
+
+
+# Replicating Gete and Reher(2018) main results
+```{r rent_regression}
+
+formulas <- list()
+formulas[[1]] <- as.formula("log_delta_rent~credit_supply_shock|MSA+year|0|MSA+year")
+formulas[[2]] <- as.formula("log_delta_rent~credit_supply_shock+log(familyincome)+log(population)+unemployment_rate+median_age_msa|MSA+year|0|MSA+year")
+
+
+
+regs <- list()
+regs[[1]] <- reg <- felm(formulas[[1]],data = zillow_rent)
+regs[[2]] <- reg <- felm(formulas[[2]],data = zillow_rent)
+
+note =c("Fixed Effects:  Year, MSA","Standard Errors clustered by MSA+Year")
+
+
+printtable(regs,"","dela_log(rent)",note,"none","")
+```
+
+
+# Descriptives : Rent 
+```{r}
+
+stargazer(zillow_rent[, c("rent","log_delta_rent")], type = "text", summary.stat = c("mean","median","sd", "n"),notes = "",digits = 4)
+
+```
+
+# Default on Rent: no controls
+```{r}
+ rm(iv_reg)
+ 
+ note =c("Fixed Effects: Loan, Year, MSA, Seller","Standard Errors clustered by Loan,MSA")
+ controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)+log(medianhhincome)+log(totalpopulation)+white_frac+renter_frac+collegedegree_frac|factor(year)+factor(MSA)+factor(LOANNO)"
+ 
+ formulas <- list()
+ formulas[[1]] <- as.formula(paste("default~log(rent)|factor(year)+factor(MSA)+factor(LOANNO)|0|LOANNO+MSA",sep=""))
+ formulas[[2]] <- as.formula(paste("log(rent)~css|factor(year)+factor(MSA)+factor(LOANNO)|0|LOANNO+MSA",sep=""))
+ formulas[[3]] <- as.formula(paste("default~1|factor(year)+factor(MSA)+factor(LOANNO)|(log(rent)~css)|LOANNO+MSA+year",sep=""))
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month) 
+
+condf <- c("Cond. F. Stat","","",round(condfstat(iv_reg[[3]])[[1]],2))
+printtable(iv_reg,c("OLS","First Stage","IV"),"default",note,"credit supply shock",list(condf))
+```
+
+
+# Default on Rent: with controls
+```{r}
+ rm(iv_reg)
+ 
+ note =c("Fixed Effects: Loan, Year, MSA, Seller","Standard Errors clustered by Loan,MSA")
+ controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)+unemp_rate+log(medianhhincome)+log(totalpopulation)+white_frac+renter_frac+collegedegree_frac|factor(year)+factor(MSA)+factor(LOANNO)"
+ 
+ formulas <- list()
+ formulas[[1]] <- as.formula(paste("default~log(rent)+",controls,"|0|LOANNO+MSA",sep=""))
+ formulas[[2]] <- as.formula(paste("log(rent)~css+",controls,"|0|LOANNO+MSA",sep=""))
+ formulas[[3]] <- as.formula(paste("default~",controls,"|(log(rent)~css)|LOANNO+MSA+year",sep=""))
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+iv_reg[[3]] <- felm(formulas[[3]], data=loan_month) 
+
+condf <- c("Cond. F. Stat","","",round(condfstat(iv_reg[[3]])[[1]],2))
+printtable(iv_reg,c("OLS","First Stage","IV"),"default",note,"credit supply shock",list(condf))
+```
+
