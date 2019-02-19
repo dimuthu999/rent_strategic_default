@@ -1,0 +1,537 @@
+---
+title: "OTS -> OCC"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r init}
+rm(list=ls())
+library(data.table)
+library(lfe)
+library(stargazer)
+library(plyr)
+library(reshape2)
+library(lubridate)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+
+
+
+
+#variables
+output.type="text"
+
+
+# functions
+printtable <- function(reg,column.labels,depvar,note,iv,lines) {
+  stargazer(reg,type=output.type,no.space = TRUE,omit.stat = c("f","adj.rsq","ser"),notes= note,column.labels = column.labels, dep.var.labels = "",dep.var.caption   = paste("Y: ",gsub("_"," ",depvar),"; iv: ",gsub("_"," ",iv)),dep.var.labels.include = FALSE,add.lines = lines)
+}
+
+```
+
+```{r}
+hmda <- readRDS(file="C:/Users/dnratnadiwakara/Documents/interest rate and default/Data/Raw/HMDA/agency/agency_hmda.rds")
+```
+
+
+# Descriptives: Owneroccupied, new purchase
+```{r}
+stargazer(hmda[hmda$actiontaken %in% c(1,3) &  hmda$occupancy=="1" & hmda$purposeofloan=="1" & hmda$asofdate>=2008, c("denied","amountofloan","loan_to_income","applicantincome","ots_lender","asofdate")], type = "text", summary.stat = c("mean","median","sd", "n"),notes = "",digits = 4)
+```
+# Descriptives: Owneroccupied, refinance
+```{r}
+stargazer(hmda[hmda$actiontaken %in% c(1,3) &  hmda$occupancy=="1" & hmda$purposeofloan=="3" & hmda$asofdate>=2008, c("denied","amountofloan","loan_to_income","applicantincome","ots_lender","asofdate")], type = "text", summary.stat = c("mean","median","sd", "n"),notes = "",digits = 4)
+```
+
+
+
+
+# Propensity to deny: loan applications after 2008
+```{r }
+
+gc()
+regs <- list()
+regs[[1]] <- felm(as.formula("denied~post*ots_lender+fha+log(applicantincome)+log(amountofloan)+loan_to_income|msa_time+ots_msa+applicantrace1|0|msa"),data =hmda[hmda$actiontaken %in% c(1,3) &  hmda$occupancy=="1" & hmda$purposeofloan=="1" & hmda$asofdate>=2008])
+gc()
+regs[[2]] <- felm(as.formula("denied~post*ots_lender+fha+log(applicantincome)+log(amountofloan)+loan_to_income|msa_time+ots_msa+applicantrace1|0|msa"),data =hmda[hmda$actiontaken %in% c(1,3) &  hmda$occupancy=="1" & hmda$purposeofloan=="3"  & hmda$asofdate>=2008])
+
+note =c("Fixed Effects:  MSA*Year, MSA*OTS, Race","Standard Errors clustered by MSA")
+
+
+printtable(regs,c("New purchases","Refinances"),"denied",note,"none","")
+rm(regs)
+gc(verbose = FALSE)
+```
+
+
+
+# Propensity to deny: parellel trends
+```{r }
+hmda[,year:=as.factor(hmda$asofdate)]
+hmda <- within(hmda, year <- relevel(year, ref = 8))
+rm(regs)
+gc()
+regs <- list()
+regs[[1]] <- felm(as.formula("denied~factor(year)*factor(ots_lender)+fha+log(applicantincome)+log(amountofloan)+loan_to_income|msa_time+ots_msa+applicantrace1|0|msa"),data =hmda[hmda$actiontaken %in% c(1,3) &  hmda$occupancy=="1" & hmda$purposeofloan=="1" & hmda$asofdate>=2008 ])
+gc()
+regs[[2]] <- felm(as.formula("denied~factor(year)*factor(ots_lender)+fha+log(applicantincome)+log(amountofloan)+loan_to_income|msa_time+ots_msa+applicantrace1|0|msa"),data =hmda[hmda$actiontaken %in% c(1,3) &  hmda$occupancy=="1" & hmda$purposeofloan=="3" & hmda$asofdate>=2008 ])
+
+note =c("Fixed Effects:  MSA*Year, MSA*OTS, Race","Standard Errors clustered by MSA,Year")
+
+
+printtable(regs,c("New purchases","Refinances"),"denied",note,"none","")
+```
+
+```{r}
+coefs <- c(as.vector(regs[[1]]$coefficients[12:14]),0,as.vector(regs[[1]]$coefficients[15:17]))
+se <- c(as.vector(regs[[1]]$cse[12:14]),0,as.vector(regs[[1]]$cse[15:17]))
+se_lb <- coefs - se*1.96
+se_ub <- coefs + se*1.96
+years <- c(2008:2014)
+
+df <- as.data.frame(cbind(years,coefs),stringsAsFactors = FALSE)
+
+gr1<- ggplot(df, aes(x=years, y=coefs)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0,position=position_dodge(0))+
+  scale_x_continuous(breaks=years)+ theme_bw()+ylab(expression(beta[y])) + xlab("")+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr1
+
+coefs <- c(as.vector(regs[[2]]$coefficients[12:14]),0,as.vector(regs[[2]]$coefficients[15:17]))
+se <- c(as.vector(regs[[2]]$cse[12:14]),0,as.vector(regs[[2]]$cse[15:17]))
+se_lb <- coefs - se*1.96
+se_ub <- coefs + se*1.96
+years <- c(2008:2014)
+
+df <- as.data.frame(cbind(years,coefs),stringsAsFactors = FALSE)
+
+gr2<- ggplot(df, aes(x=years, y=coefs)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0,position=position_dodge(0))+
+  scale_x_continuous(breaks=years)+ theme_bw()+ylab(expression(beta[y])) + xlab("")+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+
+gr2
+
+```
+
+
+
+
+# Fraction of OTS loans in census tracts in 2008-2009
+```{r}
+msa_summary_refin <- hmda[hmda$actiontaken %in% c(1,2,3) & hmda$occupancy=="1" & hmda$purposeofloan=="3" & hmda$asofdate==2009, .(count = .N), by = list(censustract,ots_lender)]
+msa_summary_refin <- dcast(msa_summary_refin,formula =censustract~ots_lender )
+names(msa_summary_refin) <- c("censustract","nonots_refin","ots_refin")
+# msa_summary_refin$nonots_refin <- ifelse(is.na(msa_summary_refin$nonots_refin),0,msa_summary_refin$nonots_refin)
+# msa_summary_refin$ots_refin <- ifelse(is.na(msa_summary_refin$ots_refin),0,msa_summary_refin$ots_refin)
+msa_summary_refin <- data.table(msa_summary_refin)
+msa_summary_refin[,ots_pct_refin:=msa_summary_refin$ots_refin/(msa_summary_refin$ots_refin+msa_summary_refin$nonots_refin)]
+
+msa_summary <- msa_summary_refin
+
+msa_summary[,msa_loans_2009:=msa_summary$nonots_refin+msa_summary$ots_refin]
+msa_summary[,c("nonots_purch","ots_purch","nonots_refin","ots_refin"):=list(NULL)]
+
+# 
+# hmda[,c("ots_pct_purch","ots_pct_refin","msa_loans_2009","ots_pct_purch_q","ots_pct_refin_q"):=list(NULL)]
+# hmda<- merge(hmda,msa_summary,by="censustract",all.x = TRUE)
+
+qplot(msa_summary$ots_pct_refin, geom="histogram") +theme_minimal()+xlab("Fraction of OTS Loans 2008-2009 (Refinance)")+ggtitle("")
+```
+
+
+```{r eval=FALSE,include=FALSE}
+# Propensity to deny using the fraction of OTS loans in each census tract
+rm(regs)
+gc(verbose = FALSE)
+regs <- list()
+regs[[1]] <- felm(as.formula("denied~ots_pct_refin*factor(asofdate)+ots_lender+fha+log(applicantincome)+log(amountofloan)+loan_to_income|censustract+asofdate+applicantrace1|0|censustract"),data =hmda[hmda$actiontaken %in% c(1,3) &  hmda$occupancy=="1" & hmda$purposeofloan=="3" & hmda$asofdate>2007 & hmda$msa_loans_2009>30])
+
+
+note =c("Fixed Effects:  Census tract ,Year, Race","Standard Errors clustered by Census tract","Sample restricted to census tracts with more than 30 loans, period after 2008")
+# denied~log(ots_pct_refin)*post+fha+log(applicantincome)+log(amountofloan)+loan_to_income|msa+asofdate+applicantrace1|0|msa
+# denied~post*ots_lender+fha+log(applicantincome)+log(amountofloan)+loan_to_income|msa_time+ots_msa+applicantrace1|0|msa+asofdate
+
+printtable(regs,c(""),"I(denied)",note,"none","")
+```
+
+
+
+```{r}
+# msa_summary_purch <- hmda[hmda$actiontaken %in% c(1,3) & hmda$occupancy=="1" & hmda$purposeofloan=="1" & hmda$asofdate %in% c("2008","2009"), .(count = .N), by = list(msa,ots_lender)]
+# msa_summary_purch <- dcast(msa_summary_purch,formula =msa~ots_lender )
+# names(msa_summary_purch) <- c("msa","nonots_purch","ots_purch")
+# # msa_summary_purch$nonots_purch <- ifelse(is.na(msa_summary_purch$nonots_purch),0,msa_summary_purch$nonots_purch)
+# # msa_summary_purch$ots_purch <- ifelse(is.na(msa_summary_purch$ots_purch),0,msa_summary_purch$ots_purch)
+# msa_summary_purch <- data.table(msa_summary_purch)
+# 
+# msa_summary_purch[,ots_pct_purch:=msa_summary_purch$ots_purch/(msa_summary_purch$ots_purch+msa_summary_purch$nonots_purch)]
+
+msa_summary_refin <- hmda[hmda$actiontaken %in% c(1,2,3) & hmda$occupancy=="1" & hmda$purposeofloan=="3" & hmda$asofdate==2009, .(count = .N), by = list(msa,ots_lender)]
+msa_summary_refin <- dcast(msa_summary_refin,formula =msa~ots_lender )
+names(msa_summary_refin) <- c("msa","nonots_refin","ots_refin")
+# msa_summary_refin$nonots_refin <- ifelse(is.na(msa_summary_refin$nonots_refin),0,msa_summary_refin$nonots_refin)
+# msa_summary_refin$ots_refin <- ifelse(is.na(msa_summary_refin$ots_refin),0,msa_summary_refin$ots_refin)
+msa_summary_refin <- data.table(msa_summary_refin)
+msa_summary_refin[,ots_pct_refin:=msa_summary_refin$ots_refin/(msa_summary_refin$ots_refin+msa_summary_refin$nonots_refin)]
+
+msa_summary <- msa_summary_refin#merge(msa_summary_purch,msa_summary_refin,by="msa")
+
+msa_summary[,msa_loans_2009:=msa_summary$nonots_refin+msa_summary$ots_refin]
+msa_summary[,c("nonots_purch","ots_purch","nonots_refin","ots_refin"):=list(NULL)]
+
+# msa_summary[,ots_pct_purch_q:= ntile(msa_summary$ots_pct_purch,4)]
+# msa_summary[,ots_pct_refin_q:= ntile(msa_summary$ots_pct_refin,4)]
+
+```
+
+```{r read_freddie_data}
+rm(hmda)
+rm(reg)
+rm(regs)
+gc()
+loan_month <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/processed data/freddie per data/freddie_data_loan_month.rds")
+
+
+loan_month[,default:=ifelse(loan_month$CURRENTLOANDELINQ>=1,1,0)]
+loan_month[,foreclosed:= ifelse(loan_month$ZEROBALANCECODE>=3 & !is.na(loan_month$ZEROBALANCECODE),1,0)]
+loan_month[,prepaid:=ifelse(loan_month$ZEROBALANCECODE==1 & !is.na(loan_month$ZEROBALANCECODE),1,0)]
+
+
+
+```
+# Zillow Data
+```{r}
+# zillow_rent <- readRDS(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/creditsupplyshock.rds")
+#   zillow_rent[,c("zip3_big4_frac","big4_nbig4","msa","city","msa_big4_frac","rent_1","zip")] <- list(NULL)
+#   names(zillow_rent)[1] = "MSA"
+  
+zillow_rent <- read.csv(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/Affordability_ChainedZRI_2018Q3.csv")
+zillow_rent$RegionID <- NULL
+zillow_rent$SizeRank <- NULL
+
+zillow_rent <- melt(zillow_rent,id.vars = c("RegionName"))
+zillow_rent['year'] <- substr(zillow_rent$variable,2,5)
+zillow_rent['month'] <- substr(zillow_rent$variable,7,8)
+zillow_rent <- zillow_rent[zillow_rent$month=="12",]
+zillow_rent$variable <- NULL
+zillow_rent$month <- NULL
+zillow_rent$RegionName <- as.character(zillow_rent$RegionName)
+
+names(zillow_rent) <- c("msa","rent","year")
+zillow_rent['city'] <- tolower(zillow_rent$msa)
+
+library(zipcode)
+data("zipcode")
+zipcode$city <- tolower(paste(zipcode$city,", ",zipcode$state,sep=""))
+zipcode[,c("state","latitude","longitude")] <- list(NULL)
+
+zillow_rent <- merge(zillow_rent,zipcode,by="city",all.x = TRUE)
+
+unmatched <- read.csv(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/unmatched_msa_2.csv")
+unmatched$msa <- as.character(unmatched$msa)
+zillow_rent <- merge(zillow_rent,unmatched,by="msa",all.x = TRUE)
+zillow_rent$zip <- ifelse(is.na(zillow_rent$zip),zillow_rent$zip2,zillow_rent$zip)
+zillow_rent <- zillow_rent[!is.na(zillow_rent$zip),]
+zillow_rent <- zillow_rent[!is.na(zillow_rent$rent),]
+zillow_rent$zip2 <- NULL
+zillow_rent$zip <- as.integer(zillow_rent$zip)
+
+zip_cbsa <- read.csv(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/ZIP_CBSA_092018.csv")
+zillow_rent <- merge(zillow_rent,zip_cbsa,by="zip",all.x = TRUE)
+not_na <- unique(zillow_rent[!is.na(zillow_rent$cbsa),]$msa)
+yes_na <- unique(zillow_rent[is.na(zillow_rent$cbsa),]$msa)
+unmatched <- not_na[!not_na %in% yes_na]
+zillow_rent <- zillow_rent[!is.na(zillow_rent$cbsa),]
+zillow_rent <- zillow_rent[!duplicated(zillow_rent[,c("cbsa","year")]),]
+
+zillow_rent <- zillow_rent[!is.na(zillow_rent$rent),]
+zillow_rent$msa <- NULL
+zillow_rent$year <- as.numeric(zillow_rent$year)
+zillow_rent$zip <- NULL
+zillow_rent$city <- NULL
+
+names(zillow_rent) <- c("rent","year","MSA")
+
+
+
+loan_month <- merge(loan_month,zillow_rent,by=c("MSA","year"))
+
+# loan_month <- loan_month[loan_month$log_delta_rent >-0.2 & loan_month$log_delta_rent<0.2]
+# loan_month <- loan_month[loan_month$current_equity>-1]
+
+cols.to.del <- c("REPURCHASEFLAG","MODIFICATIONFLAG","MODIFICATIONCOST","FIRSTPAYMENTDATE","MATURITYDATE","NUMBEROFUNITS","LOANTERM","org_hpi","current_hpi","POSTALCODE")
+loan_month[,(cols.to.del):=NULL]
+
+# loan_month <- loan_month[loan_month$log_delta_rent >-0.1 & loan_month$log_delta_rent<0.1]
+# loan_month <- loan_month[!is.na(loan_month$credit_supply_shock_1)]
+loan_month[,default_2:=ifelse(!loan_month$CURRENTLOANDELINQ %in% c("0","1","2","3","4"),1,0)]
+loan_month[,default:=ifelse(!loan_month$CURRENTLOANDELINQ %in% c("0"),1,0)]
+
+
+loan_month <- merge(loan_month,msa_summary,by.x=c("MSA"),by.y = "msa")
+loan_month[,post := ifelse(loan_month$CURRENTMONTH>="2011-06-01",1,0)]
+```
+
+# ACS Data
+```{r}
+# library(tidycensus)
+# census_api_key("06b232797e7854aad802d7c7d8673c337fe1b29a")
+# 
+# for(year in 2017:2010) {
+#           print(year)
+#           temp <- get_acs(geography = "metropolitan statistical area/micropolitan statistical area", year = year,output = "wide",
+#                          variables = c("B19013_001E","B01002_001E","B01003_001E","B02001_003E","B02001_002E","B07013_003E","B10058_002E","B06009_004E"))
+#           temp['year'] <- year
+#           temp[,c("B19013_001M","B01002_001M","B01003_001M","B02001_003M","B02001_002M","B07013_003M","B10058_002M","B06009_004M")] <- NULL
+#           write.table(temp,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",col.names = FALSE,row.names = FALSE,sep="|",quote = FALSE,append = TRUE)
+# }
+# temp$year = 2009
+# write.table(temp,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",col.names = FALSE,row.names = FALSE,sep="|",quote = FALSE,append = TRUE)
+# temp$year = 2008
+# write.table(temp,file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",col.names = FALSE,row.names = FALSE,sep="|",quote = FALSE,append = TRUE)
+
+acs_data <- fread("C:/Users/dnratnadiwakara/Documents/rent_strategic_default/acs_msa_2.csv",sep="|",stringsAsFactors = FALSE,header = FALSE)
+names(acs_data) <- c("MSA","name","medianhhincome","medianage","totalpopulation","blackpopulation","whitepopulation","renters","laborforce","collegedegree","year")
+acs_data$name <- NULL
+acs_data[,white_frac:= acs_data$whitepopulation/acs_data$totalpopulation]
+acs_data[,renter_frac:= acs_data$renters/acs_data$totalpopulation]
+acs_data[,collegedegree_frac:= acs_data$collegedegree/acs_data$totalpopulation]
+acs_data[,c("blackpopulation","whitepopulation","renters","laborforce","collegedegree"):=list(NULL)]
+
+loan_month[,c("name","medianhhincome","medianage","totalpopulation","blackpopulation","whitepopulation","renters","laborforce","collegedegree"):=list(NULL)]
+
+loan_month <- merge(loan_month,acs_data,by=c("MSA","year"),all.x=TRUE)
+
+```
+
+
+# BLS Data
+```{r}
+bls_data <- fread(file="C:/Users/dnratnadiwakara/Documents/rent_strategic_default/bls_unemp_metro.txt")
+bls_data[,MSA:=as.integer(substr(bls_data$series_id,8,12))]
+bls_data[,month:=as.Date(paste(bls_data$year,substr(bls_data$period,2,3),"01",sep="-"))]
+bls_data[,series:=substr(bls_data$series_id,19,20)]
+bls_data <- bls_data[bls_data$series=="03"]
+bls_data[,c("series_id","year","period","footnote_codes","series"):=list(NULL)]
+names(bls_data) <- c("unemp_rate","MSA","month")
+bls_data <- bls_data[!duplicated(bls_data[,c("MSA","month")])]
+bls_data <- bls_data[bls_data$month >= "2008-01-01"]
+setkey(bls_data,MSA,month)
+
+setkey(loan_month,MSA,month)
+loan_month <- merge(loan_month,bls_data,by=c("MSA","month"),all.x=TRUE)
+
+
+```
+
+
+# Default on otc_fraction x after2011
+
+```{r}
+
+note =c("Fixed Effects: Loan, Year, MSA","Standard Errors clustered by Loan")
+
+# controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)+unemp_rate+log(medianhhincome)+log(totalpopulation)+white_frac+renter_frac+collegedegree_frac|factor(year)+factor(MSA)+factor(LOANNO)"
+controls = "LOANAGE+I(LOANAGE^2)+I(LOANAGE^3)+current_equity*log(current_housevalue)+unemp_rate+log(medianhhincome)+log(totalpopulation)+white_frac+renter_frac+collegedegree_frac|factor(year)+factor(MSA)+factor(LOANNO)"
+
+formulas <- list()
+
+# formulas[[1]] <- as.formula(paste("default~log(rent)|factor(year)+factor(MSA)+factor(LOANNO)+factor(SELLERNAME)|0|LOANNO",sep=""))
+formulas[[1]] <- as.formula(paste("default~ots_pct_refin*post|factor(year)+factor(MSA)+factor(LOANNO)|0|LOANNO+MSA",sep=""))
+formulas[[2]] <- as.formula(paste("default~ots_pct_refin*post+",controls,"|0|LOANNO+MSA",sep=""))
+
+# formulas[[3]] <- as.formula(paste("default~1|factor(year)+factor(MSA)+factor(LOANNO)+factor(SELLERNAME)|(log(rent)~credit_supply_shock_1)|LOANNO",sep=""))
+
+
+rm(iv_reg)
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[1]], data=loan_month)
+# iv_reg[[1]]$residuals <- NULL
+# iv_reg[[1]]$c.fitted.values <- NULL
+# iv_reg[[1]]$fitted.values <- NULL
+# iv_reg[[1]]$r.residuals <- NULL
+# iv_reg[[1]]$response <- NULL
+# iv_reg[[1]]$robustvcv <- NULL
+# iv_reg[[1]]$inv <- NULL
+# iv_reg[[1]]$fe <- NULL
+gc()
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+gc()
+# iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+# iv_reg[[3]] <- felm(formulas[[3]], data=loan_month) #[loan_month$CURRENTLOANDELINQ<=1,]
+# 
+# 
+# condf <- c("Cond. F. Stat","","",round(condfstat(iv_reg[[3]])[[1]],2))
+
+printtable(iv_reg,c("OLS","First Stage","IV"),"default",note,"credit supply shock",list("condf"))
+```
+
+
+
+#  Default on otc_fraction x after2011: parellel trends
+```{r}
+rm(iv_reg)
+gc()
+# loan_month[,year:= as.integer(loan_month$year)]
+loan_month[,year:= as.factor(loan_month$year)]
+loan_month <- within(loan_month, year <- relevel(year, ref = 4))
+formulas[[3]] <- as.formula(paste("default~ots_pct_refin*factor(year)|factor(year)+factor(MSA)+factor(LOANNO)|0|LOANNO+MSA",sep=""))
+
+
+iv_reg <- list()
+
+iv_reg[[1]] <- felm(formulas[[3]], data=loan_month)
+gc()
+# iv_reg[[2]] <- felm(formulas[[2]], data=loan_month)
+# iv_reg[[3]] <- felm(formulas[[3]], data=loan_month) #[loan_month$CURRENTLOANDELINQ<=1,]
+# 
+# 
+# condf <- c("Cond. F. Stat","","",round(condfstat(iv_reg[[3]])[[1]],2))
+
+# sample <- within(sample, year <- relevel(year, ref = 6))
+printtable(iv_reg,c("OLS","First Stage","IV"),"default","","credit supply shock",list("condf"))
+```
+
+
+```{r}
+coefs <- c(as.vector(iv_reg[[1]]$coefficients[11:13]),0,as.vector(iv_reg[[1]]$coefficients[14:19]))
+se <- c(as.vector(iv_reg[[1]]$cse[11:13]),0,as.vector(iv_reg[[1]]$cse[14:19]))
+se_lb <- coefs - se*1.96
+se_ub <- coefs + se*1.96
+years <- c(2008:2017)
+
+df <- as.data.frame(cbind(years,coefs),stringsAsFactors = FALSE)
+
+gr1<- ggplot(df, aes(x=years, y=coefs)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0,position=position_dodge(0))+
+  scale_x_continuous(breaks=years)+ theme_bw()+ylab(expression(beta[y])) + xlab("")+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr1
+```
+
+
+# Default on otc_fraction x after2011: Binned Scatter Plot
+```{r}
+adj_default <- felm(default~1|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month[!is.na(loan_month$ots_pct_refin) & loan_month$post==1])
+adj_default_resid <- adj_default$residuals
+
+adj_ots_shock <- felm(ots_pct_refin~1|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month[loan_month$post==1])
+adj_ots_shock_resid <- adj_ots_shock$residuals
+
+resids <- as.data.frame(cbind(adj_ots_shock_resid,adj_default_resid))
+names(resids) <- c("ots_frac","adj_default_resid")
+
+resids <- resids[resids$ots_frac>=quantile(resids$ots_frac,0.01)  & resids$ots_frac<=quantile(resids$ots_frac,0.99),]
+
+
+# resids['ots_frac_rounded'] <- floor(resids$ots_frac*1e32)/1e32
+resids['ots_frac_percent'] <- ntile(resids$ots_frac,100)
+
+resids <- data.table(resids)
+
+resids_summary <- resids[,list(mean_default=mean(adj_default_resid)),by=list(ots_frac_percent)]
+resids_summary[,group:="post"]
+
+adj_default <- felm(default~1|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month[!is.na(loan_month$ots_pct_refin) & loan_month$post==0 ])
+adj_default_resid <- adj_default$residuals
+
+adj_ots_shock <- felm(ots_pct_refin~1|factor(year)+factor(MSA)+factor(LOANNO),data=loan_month[loan_month$post==0 ])
+adj_ots_shock_resid <- adj_ots_shock$residuals
+
+
+resids2 <- as.data.frame(cbind(adj_ots_shock_resid,adj_default_resid))
+names(resids2) <- c("ots_frac","adj_default_resid")
+
+resids2 <- resids2[resids2$ots_frac>=quantile(resids2$ots_frac,0.01)  & resids2$ots_frac<=quantile(resids2$ots_frac,0.99),]
+
+
+# resids['ots_frac_rounded'] <- floor(resids$ots_frac*1e32)/1e32
+resids2['ots_frac_percent'] <- ntile(resids2$ots_frac,100)
+
+resids2 <- data.table(resids2)
+
+resids2_summary <- resids2[,list(mean_default=mean(adj_default_resid)),by=list(ots_frac_percent)]
+resids2_summary[,group:="pre"]
+
+resid_sum <- rbind(resids_summary,resids2_summary)
+# 
+# g1 = ggplot(resid_sum,aes(x=ots_frac_percent,y=mean_default,color=group))+geom_point(aes(group=group))+geom_smooth(method="lm",formula=y~x,se=FALSE,color="red")+xlab("Percentile of FE adjusted OTS Fraction")+ylab("FE adjusted default")+theme_minimal()+theme(legend.position="bottom",legend.title = element_blank())
+# g1
+
+g2 = ggplot(resid_sum[resid_sum$mean_default<=0.005 & resid_sum$mean_default>= (-0.005)]
+            ,aes(x=ots_frac_percent,y=mean_default,color=group,shape=group))+geom_point(size=3)+geom_smooth(method=lm, formula =  y ~ x,se=FALSE, fullrange=TRUE)+xlab("Percentile of FE adjusted OTS Fraction")+ylab("FE adjusted default")+theme_minimal()+theme(legend.position="bottom",legend.title = element_blank())
+g2
+
+
+```
+
+#  Default on otc_fraction x after2011: FICO Split
+
+```{r}
+
+# loan_month[,fico_qs:=ntile(loan_month$CREDITSCORE,4)]
+rm(iv_reg)
+gc()
+iv_reg <- list()
+
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE<=700])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE> 700 & loan_month$CREDITSCORE<=750])
+iv_reg[[3]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE> 750 & loan_month$CREDITSCORE<=780])
+iv_reg[[4]] <- felm(formulas[[2]], data=loan_month[loan_month$CREDITSCORE>780])
+
+printtable(iv_reg,c("<700","700-750","750-780",">780"),"default",note,"credit supply shock","")
+
+
+```
+
+
+
+#  Default on otc_fraction x after2011: CLTV Split
+
+```{r}
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$CLTV<=80])
+# iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$CLTV==80])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$CLTV> 80])
+
+
+printtable(iv_reg,c("<=80",">80"),"default",note,"","")
+
+```
+
+# Default on otc_fraction x after2011: Loan Amount Split
+```{r}
+rm(iv_reg)
+gc()
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$ORIGINALUPB<=125000])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$ORIGINALUPB> 125000 & loan_month$ORIGINALUPB<=250000])
+iv_reg[[3]] <- felm(formulas[[2]], data=loan_month[loan_month$ORIGINALUPB>250000])
+
+printtable(iv_reg,c("<125k","125k-250k",">250k"),"default",note,"","")
+
+
+```
+
+
+# Default on otc_fraction x after2011: DTI split
+```{r}
+rm(iv_reg)
+
+
+iv_reg <- list()
+iv_reg[[1]] <- felm(formulas[[2]], data=loan_month[loan_month$DTI<=30])
+iv_reg[[2]] <- felm(formulas[[2]], data=loan_month[loan_month$DTI> 30 & loan_month$DTI<=40])
+iv_reg[[3]] <- felm(formulas[[2]], data=loan_month[loan_month$DTI>40])
+
+printtable(iv_reg,c("<=30","30-40",">40"),"default",note,"","")
+
+
+```
